@@ -15,7 +15,6 @@ class DBSpec extends CatsEffectSuite:
     "Should be able to initialise an empty db, store stuff and read it back out"
   ) {
     Files[IO].tempFile.use { dbPath =>
-      println(dbPath)
       for
         _     <- Files[IO].delete(dbPath)
         now   <- IO { Instant.now() }

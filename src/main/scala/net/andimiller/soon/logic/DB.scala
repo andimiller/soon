@@ -40,12 +40,14 @@ object DB {
       override def getEvents: F[Vector[Event]] =
         for db <- readDb
         yield db.upcoming
-      override def addEvent(e: Event): F[Unit] =
+
+      override def addEvent(e: Event): F[Unit] = {
         for
           db <- readDb
           db2 = db.copy(upcoming = db.upcoming.appended(e))
           _  <- writeDb(db2)
         yield ()
+      }
     }
     db.createIfNotExists.as(db)
   }

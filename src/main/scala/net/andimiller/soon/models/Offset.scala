@@ -3,9 +3,10 @@ package net.andimiller.soon.models
 import cats.{Eval, Show}
 import cats.implicits.*
 import cats.kernel.Semigroup
-import cats.parse.Parser
-import cats.parse.Numbers.digits
+import cats.parse.{Numbers, Parser}
 import net.andimiller.cats.parse.interpolator.*
+import net.andimiller.soon.models.TimeUnit.Second
+import fansi.Color.{Red}
 
 enum Offset:
   case Single(count: Int, unit: TimeUnit)
@@ -33,6 +34,10 @@ enum Offset:
     case Offset.Add(left, right)    =>
       left.toSeconds + right.toSeconds
 
+  def invert: Offset = this match
+    case Offset.Single(count, unit) => Offset.Single(0 - count, unit)
+    case Offset.Add(left, right)    => Offset.Add(left.invert, right.invert)
+
   def simplify: Offset = {
     val combined = simplifyCombine.value
 
@@ -56,19 +61,26 @@ enum Offset:
       .flatMap { u =>
         rebucketed.get(u).map(v => Single(v, u))
       }
-      .reduce(Add.apply)
+      .reduceOption(Add.apply)
+      .getOrElse(Single(0, Second))
   }
 
 object Offset:
   given Semigroup[Offset]      = Offset.Add(_, _)
   given Show[Offset]           = {
-    case Single(count, unit) => show"$count$unit"
+    case Single(count, unit) =>
+      if (count <= 0) {
+        Red(show"$count$unit").render
+      } else {
+        show"$count$unit"
+      }
     case Add(left, right)    => show"$left $right"
   }
   given parser: Parser[Offset] =
     Parser.recursive[Offset] { recurse =>
-      val single = p"$digits${TimeUnit.parser}".map { case (d, u) =>
-        Single(d.toInt, u)
+      val single = p"${Numbers.signedIntString}${TimeUnit.parser}".map {
+        case (d, u) =>
+          Single(d.toInt, u)
       }
 
       p"$single $recurse"

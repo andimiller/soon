@@ -50,13 +50,20 @@ class OffsetSpec extends munit.ScalaCheckSuite:
     )
   }
 
+  test("Negative numbers should work") {
+    assertEquals(
+      obtained = Offset.fromString("-4d"),
+      expected = Right(Offset.Single(-4, Day))
+    )
+  }
+
   given timeUnit: Arbitrary[TimeUnit] = Arbitrary(Gen.oneOf(TimeUnit.values))
   given Arbitrary[Offset]             = Arbitrary(
     Gen
       .recursive[Offset] { recurse =>
         val single = for
           u     <- timeUnit.arbitrary
-          value <- Gen.choose(1, u.maxValue)
+          value <- Gen.choose(0 - u.maxValue, u.maxValue)
         yield Offset.Single(value, u)
 
         val join = for
@@ -71,6 +78,6 @@ class OffsetSpec extends munit.ScalaCheckSuite:
 
   property("Should round trip show and parse") {
     forAll { (o: Offset) =>
-      Offset.fromString(o.show).map(_.simplify) == Right(o)
+      Offset.fromString(fansi.Str(o.show).plainText).map(_.simplify) == Right(o)
     }
   }

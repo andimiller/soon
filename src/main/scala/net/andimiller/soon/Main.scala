@@ -5,7 +5,6 @@ import cats.effect.Async
 import cats.implicits.*
 import cats.effect.{ExitCode, IO, IOApp}
 import fs2.io.file.Path
-import net.andimiller.soon.CLI.Config
 import net.andimiller.soon.logic.{DB, Core}
 
 object Main extends IOApp:

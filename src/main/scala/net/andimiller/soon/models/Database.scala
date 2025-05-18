@@ -10,18 +10,15 @@ import scala.math.Ordered.orderingToOrdered
 
 case class Event(timestamp: Instant, granularity: TimeUnit, name: String)
     derives Codec.AsObject {
-  def toOffset(now: Instant) = {
-    assume(
-      timestamp.isAfter(now),
-      "Assuming we only convert things in the future right now"
-    )
+
+  private def offsetsBetween(first: Instant, second: Instant) = {
     val (offsets, _) =
       TimeUnit.values
         .filter(_ >= granularity)
         .sorted
         .toVector
-        .foldLeftM(now) { case (ts, unit) =>
-          val quantity      = unit.chrono.between(ts, timestamp)
+        .foldLeftM(first) { case (ts, unit) =>
+          val quantity      = unit.chrono.between(ts, second)
           val nextTimestamp = ts.plus(quantity, unit.chrono)
           Writer
             .tell(Vector(Offset.Single(quantity.toInt, unit)))
@@ -31,8 +28,19 @@ case class Event(timestamp: Instant, granularity: TimeUnit, name: String)
         }
         .run
     offsets
+  }
+
+  def toOffset(now: Instant) = {
+    val offsets = if (timestamp.isAfter(now)) {
+      offsetsBetween(now, timestamp)
+    } else {
+      offsetsBetween(timestamp, now).map(_.invert)
+    }
+
+    offsets
       .reduceOption(Offset.Add.apply)
       .getOrElse(Offset.Single(0, TimeUnit.Second))
+      .simplify
   }
 
 }
