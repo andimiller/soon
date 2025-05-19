@@ -11,6 +11,7 @@ trait DB[F[_]] {
   def createIfNotExists: F[Unit]
   def getEvents: F[Vector[Event]]
   def addEvent(e: Event): F[Unit]
+  def deleteEvent(index: Int): F[Unit]
 }
 
 object DB {
@@ -45,6 +46,14 @@ object DB {
         for
           db <- readDb
           db2 = db.copy(upcoming = db.upcoming.appended(e))
+          _  <- writeDb(db2)
+        yield ()
+      }
+
+      override def deleteEvent(index: Int): F[Unit] = {
+        for
+          db <- readDb
+          db2 = db.copy(upcoming = db.upcoming.filter(_ != db.upcoming(index)))
           _  <- writeDb(db2)
         yield ()
       }
