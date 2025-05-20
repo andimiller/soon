@@ -7,6 +7,7 @@ import cats.effect.kernel.Clock
 import cats.effect.std.Console
 import net.andimiller.soon.CLI.Config
 import net.andimiller.soon.models.{Event, Indexing}
+import net.andimiller.decline.completion.Completion
 import fansi.Color.Cyan
 
 trait Core[F[_]]:
@@ -22,6 +23,12 @@ object Core:
     new Core[F]:
       override def run(cmd: CLI.Config): F[Unit] =
         cmd match
+          case Config.Completion        =>
+            Async[F]
+              .delay {
+                Completion.zshBashcompatCompletion(CLI.cli)
+              }
+              .flatMap(Console[F].println(_))
           case Config.Soon              =>
             for
               d          <- db.getEvents

@@ -4,6 +4,7 @@ import cats.data.ValidatedNel
 import cats.implicits.*
 import com.monovore.decline.*
 import net.andimiller.soon.models.{Indexing, Offset}
+import net.andimiller.decline.completion.Completion
 
 object CLI:
 
@@ -11,6 +12,7 @@ object CLI:
     case Soon
     case Add(name: String, offset: Offset)
     case Del(id: String)
+    case Completion
 
   given Argument[Offset] = new Argument[Offset]:
     override def read(string: String): ValidatedNel[String, Offset] =
@@ -33,6 +35,16 @@ object CLI:
       .orNone
     )
     .map(SharedSettings(_))
+
+  val completion = Opts.subcommand(
+    "completion",
+    "output autocompletion scripts for common shells"
+  ) {
+    Opts.unit.as(
+      Config.Completion
+    )
+    // Completion.zshBashcompatCompletion(mainCli)
+  }
 
   val cli: Command[(Config, SharedSettings)] = Command(
     name = "soon",
@@ -57,6 +69,7 @@ object CLI:
             )
           )
         )
+        .orElse(completion)
         .orElse(
           Opts.unit.as(
             Config.Soon
