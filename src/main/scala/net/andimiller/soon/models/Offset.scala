@@ -6,7 +6,11 @@ import cats.kernel.Semigroup
 import cats.parse.{Numbers, Parser}
 import net.andimiller.cats.parse.interpolator.*
 import net.andimiller.soon.models.TimeUnit.Second
-import fansi.Color.{Red}
+import fansi.Color.Red
+import io.circe.{Encoder, Decoder}
+
+import scala.concurrent.duration.FiniteDuration
+import scala.math.Ordering.Implicits.*
 
 enum Offset:
   case Single(count: Int, unit: TimeUnit)
@@ -37,6 +41,28 @@ enum Offset:
   def invert: Offset = this match
     case Offset.Single(count, unit) => Offset.Single(0 - count, unit)
     case Offset.Add(left, right)    => Offset.Add(left.invert, right.invert)
+
+  def roundUpGranularity(granularity: TimeUnit): Offset = {
+    val (shown: LazyList[Offset.Single], rest: LazyList[Offset.Single]) =
+      this.simplify.iterator.map {
+        case Single(count, unit) if unit <= granularity =>
+          Left(Single(count, unit))
+        case Single(count, unit) if unit > granularity  =>
+          Right(Single(count, unit))
+      }.separate
+
+    val rounded: LazyList[Offset.Single] = Option
+      .when[Offset.Single](
+        Offset.fromSingles(rest*) > Single(0, TimeUnit.Second)
+      )(
+        Single(1, granularity)
+      )
+      .fold(shown) { o =>
+        shown.appended(o)
+      }
+
+    Offset.fromSingles(rounded*).simplify
+  }
 
   def simplify: Offset = {
     val combined = simplifyCombine.value
@@ -89,5 +115,15 @@ object Offset:
         .orElse(single)
     }
 
+  given Encoder[Offset] = Encoder[String].contramap(_.show)
+  given Decoder[Offset] = Decoder[String].emap(fromString(_))
+
+  given Ordering[Offset] = Ordering.by(_.toSeconds)
+
   def fromString(s: String): Either[String, Offset] =
     parser.parseAll(s).leftMap(_.show)
+
+  def fromSingles(s: Single*): Offset =
+    s.toVector
+      .reduceOption[Offset](Offset.Add(_, _))
+      .getOrElse(Single(0, TimeUnit.Second))

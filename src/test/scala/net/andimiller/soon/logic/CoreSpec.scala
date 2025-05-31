@@ -9,7 +9,7 @@ import cats.effect.Temporal
 import munit.CatsEffectSuite
 import net.andimiller.soon.CLI.Config
 import net.andimiller.soon.logic.FakeConsole.OutStream
-import net.andimiller.soon.models.{Indexing, Offset}
+import net.andimiller.soon.models.{Grouping, Indexing, Offset}
 import net.andimiller.soon.models.TimeUnit.*
 
 import scala.concurrent.duration.*
@@ -28,7 +28,7 @@ class CoreSpec extends CatsEffectSuite:
             ZonedDateTime.of(2025, 5, 18, 20, 0, 0, 0, ZoneOffset.UTC).toInstant
           )
         db                <- DB.create[IO](dbPath)
-        core               = Core.create[IO](db, Indexing.Mode.alpha)
+        core               = Core.create[IO](db, Indexing.Mode.alpha, None)
         _                 <- core.run(Config.Add("event one", Offset.Single(1, Hour)))
         _                 <- core.run(Config.Add("event two", Offset.Single(1, Day)))
         _                 <- core.run(Config.Soon)
@@ -38,7 +38,7 @@ class CoreSpec extends CatsEffectSuite:
             .assertEquals(
               List(
                 OutStream.Std -> s"a) event one 1h${System.lineSeparator()}",
-                OutStream.Std -> s"b) event two 4h${System.lineSeparator()}"
+                OutStream.Std -> s"b) event two 1d${System.lineSeparator()}"
               )
             )
       } yield ()
@@ -54,7 +54,7 @@ class CoreSpec extends CatsEffectSuite:
           _                 <- Files[IO].delete(dbPath)
           given FakeConsole <- FakeConsole.create()
           db                <- DB.create[IO](dbPath)
-          core               = Core.create[IO](db, Indexing.Mode.number)
+          core               = Core.create[IO](db, Indexing.Mode.number, None)
           _                 <- core.run(Config.Add("event one", Offset.Single(1, Hour)))
           _                 <- core.run(Config.Add("event two", Offset.Single(1, Day)))
           _                 <- core.run(Config.Soon)
@@ -75,7 +75,7 @@ class CoreSpec extends CatsEffectSuite:
               .assertEquals(
                 List(
                   OutStream.Std -> s"0) event one -1h${System.lineSeparator()}",
-                  OutStream.Std -> s"1) event two 22h${System.lineSeparator()}"
+                  OutStream.Std -> s"1) event two 1d${System.lineSeparator()}"
                 )
               )
           _                 <- IO.sleep(2.hours)
@@ -87,8 +87,8 @@ class CoreSpec extends CatsEffectSuite:
               .assertEquals(
                 List(
                   OutStream.Std -> s"0) event one   -3h${System.lineSeparator()}",
-                  OutStream.Std -> s"1) event two   20h${System.lineSeparator()}",
-                  OutStream.Std -> s"2) event three 1d 20h${System.lineSeparator()}"
+                  OutStream.Std -> s"1) event two   1d${System.lineSeparator()}",
+                  OutStream.Std -> s"2) event three 2d${System.lineSeparator()}"
                 )
               )
           _                 <- IO.sleep(5.seconds)
@@ -98,9 +98,9 @@ class CoreSpec extends CatsEffectSuite:
               .tryTakeN(None)
               .assertEquals(
                 List(
-                  OutStream.Std -> s"0) event one   -3h -5s${System.lineSeparator()}",
-                  OutStream.Std -> s"1) event two   19h 59m 55s${System.lineSeparator()}",
-                  OutStream.Std -> s"2) event three 1d 19h 59m 55s${System.lineSeparator()}"
+                  OutStream.Std -> s"0) event one   -3h${System.lineSeparator()}",
+                  OutStream.Std -> s"1) event two   1d${System.lineSeparator()}",
+                  OutStream.Std -> s"2) event three 2d${System.lineSeparator()}"
                 )
               )
           _                 <- implicitly[FakeConsole].nextLine.set(Some("N"))
@@ -111,7 +111,7 @@ class CoreSpec extends CatsEffectSuite:
               .assertEquals(
                 List(
                   OutStream.Std -> s"Please confirm you'd like to delete this entry:${System.lineSeparator()}",
-                  OutStream.Std -> s"1) event two 19h 59m 55s${System.lineSeparator()}",
+                  OutStream.Std -> s"1) event two 1d${System.lineSeparator()}",
                   OutStream.Std -> s"y/N? "
                 )
               )
@@ -120,9 +120,9 @@ class CoreSpec extends CatsEffectSuite:
                                  .tryTakeN(None)
                                  .assertEquals(
                                    List(
-                                     OutStream.Std -> s"0) event one   -3h -5s${System.lineSeparator()}",
-                                     OutStream.Std -> s"1) event two   19h 59m 55s${System.lineSeparator()}",
-                                     OutStream.Std -> s"2) event three 1d 19h 59m 55s${System.lineSeparator()}"
+                                     OutStream.Std -> s"0) event one   -3h${System.lineSeparator()}",
+                                     OutStream.Std -> s"1) event two   1d${System.lineSeparator()}",
+                                     OutStream.Std -> s"2) event three 2d${System.lineSeparator()}"
                                    )
                                  )
           _                 <- implicitly[FakeConsole].nextLine.set(Some("Y"))
@@ -133,7 +133,7 @@ class CoreSpec extends CatsEffectSuite:
               .assertEquals(
                 List(
                   OutStream.Std -> s"Please confirm you'd like to delete this entry:${System.lineSeparator()}",
-                  OutStream.Std -> s"1) event two 19h 59m 55s${System.lineSeparator()}",
+                  OutStream.Std -> s"1) event two 1d${System.lineSeparator()}",
                   OutStream.Std -> s"y/N? ",
                   OutStream.Std -> s"Event deleted${System.lineSeparator()}"
                 )
@@ -144,11 +144,30 @@ class CoreSpec extends CatsEffectSuite:
               .tryTakeN(None)
               .assertEquals(
                 List(
-                  OutStream.Std -> s"0) event one   -3h -5s${System.lineSeparator()}",
-                  OutStream.Std -> s"1) event three 1d 19h 59m 55s${System.lineSeparator()}"
+                  OutStream.Std -> s"0) event one   -3h${System.lineSeparator()}",
+                  OutStream.Std -> s"1) event three 2d${System.lineSeparator()}"
                 )
               )
-
+          groupedCore        =
+            Core
+              .create[IO](db, Indexing.Mode.number, Some(Grouping.TrafficLight))
+          _                 <- groupedCore.run(Config.Add("next week", Offset.Single(8, Day)))
+          _                 <- groupedCore.run(Config.Add("week after", Offset.Single(16, Day)))
+          _                 <- groupedCore.run(Config.Soon)
+          _                 <-
+            implicitly[FakeConsole].queue
+              .tryTakeN(None)
+              .assertEquals(
+                List(
+                  OutStream.Std -> s"Now${System.lineSeparator()}",
+                  OutStream.Std -> s"0) event one -3h${System.lineSeparator()}",
+                  OutStream.Std -> s"1 Week${System.lineSeparator()}",
+                  OutStream.Std -> s"1) event three 2d${System.lineSeparator()}",
+                  OutStream.Std -> s"2 Weeks${System.lineSeparator()}",
+                  OutStream.Std -> s"2) next week  8d${System.lineSeparator()}",
+                  OutStream.Std -> s"3) week after 16d${System.lineSeparator()}"
+                )
+              )
         } yield ()
       }
 

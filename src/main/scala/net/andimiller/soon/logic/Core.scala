@@ -5,9 +5,8 @@ import cats.implicits.*
 import cats.effect.Async
 import cats.effect.kernel.Clock
 import cats.effect.std.Console
-import net.andimiller.soon.CLI.Config
-import net.andimiller.soon.models.{Event, Indexing}
-import net.andimiller.decline.completion.Completion
+import net.andimiller.soon.CLI.{Config, SortDimension}
+import net.andimiller.soon.models.{Event, Grouping, Indexing}
 import fansi.Color.Cyan
 
 trait Core[F[_]]:
@@ -19,17 +18,35 @@ object Core:
   ): Vector[(String, Event)] =
     (Indexing.alphabets(mode) ++ LazyList.continually("?")).zip(events).toVector
 
-  def create[F[_]: {Async, Console, Clock}](db: DB[F], mode: Indexing.Mode) =
+  def create[F[_]: {Async, Console, Clock}](
+      db: DB[F],
+      mode: Indexing.Mode,
+      grouping: Option[Grouping]
+  ) =
     new Core[F]:
       override def run(cmd: CLI.Config): F[Unit] =
         cmd match
-          case Config.Completion        =>
-            Async[F]
-              .delay {
-                Completion.zshBashcompatCompletion(CLI.cli)
-              }
-              .flatMap(Console[F].println(_))
-          case Config.Soon              =>
+          case Config.Soon if grouping.isDefined =>
+            for
+              d      <- db.getEvents
+              now    <- Clock[F].realTimeInstant
+              indexes = addIndex(mode)(d).map { case (v, k) => k -> v }.toMap
+
+              grouped = grouping.get.buckets.group(d)(now)
+              _      <-
+                grouped.toVector.traverse { case (bucket, events) =>
+                  val namePadding =
+                    events.map(_.name.length).maxOption.getOrElse(0)
+                  Console[F].println(bucket.colour(bucket.name)) *>
+                    events.traverse { event =>
+                      val i = indexes(event)
+                      Console[F].println(
+                        show"$i) ${bucket.colour(event.name.padTo(namePadding, ' '))} ${event.toOffset(now).roundUpGranularity(event.granularity)}"
+                      )
+                    }
+                }
+            yield ()
+          case Config.Soon                       =>
             for
               d          <- db.getEvents
               now        <- Clock[F].realTimeInstant
@@ -43,11 +60,11 @@ object Core:
               _          <-
                 offsets.traverse { case (i, (e, o)) =>
                   Console[F].println(
-                    show"$i) ${Cyan(e.name.padTo(namePadding, ' ')).render} $o"
+                    show"$i) ${Cyan(e.name.padTo(namePadding, ' ')).render} ${o.roundUpGranularity(e.granularity)}"
                   )
                 }
             yield ()
-          case Config.Add(name, offset) =>
+          case Config.Add(name, offset)          =>
             for
               now        <- Clock[F].realTimeInstant
               granularity = offset.granularity
@@ -55,7 +72,16 @@ object Core:
               ts          = roundedNow.plusSeconds(offset.toSeconds)
               _          <- db.addEvent(Event(ts, granularity, name))
             yield ()
-          case Config.Del(idxStr)       =>
+          case Config.Sort(by)                   =>
+            for {
+              d     <- db.getEvents
+              sorted = by match
+                         case SortDimension.Time       => d.sortBy(_.timestamp)
+                         case SortDimension.Alphabetic => d.sortBy(_.name)
+              _     <- db.setEvents(sorted)
+              _     <- run(Config.Soon)
+            } yield ()
+          case Config.Del(idxStr)                =>
             for
               d      <- db.getEvents
               now    <- Clock[F].realTimeInstant
@@ -77,7 +103,7 @@ object Core:
                                 )
                               _    <-
                                 Console[F].println(
-                                  show"$i) ${Cyan(e.name).render} $o"
+                                  show"$i) ${Cyan(e.name).render} ${o.roundUpGranularity(e.granularity)}"
                                 )
                               _    <- Console[F].print("y/N? ")
                               bool <- Console[F].readLine.map {

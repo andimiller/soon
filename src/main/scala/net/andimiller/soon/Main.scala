@@ -29,7 +29,8 @@ object Main extends IOApp:
           db  <- DB.create[IO](c)
           core = Core.create[IO](
                    db,
-                   settings.indexOverride.getOrElse(Indexing.Mode.alpha)
+                   settings.indexOverride.getOrElse(Indexing.Mode.alpha),
+                   settings.grouping
                  )
           _   <- core.run(cmd)
         yield ExitCode.Success

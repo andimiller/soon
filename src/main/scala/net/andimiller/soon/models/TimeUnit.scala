@@ -5,6 +5,7 @@ import cats.parse.Parser
 import net.andimiller.cats.parse.interpolator.*
 import cats.implicits.*
 import io.circe.{Decoder, Encoder}
+import scala.concurrent.duration
 
 import java.time.temporal.ChronoUnit
 

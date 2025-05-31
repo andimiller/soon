@@ -5,13 +5,16 @@ import cats.implicits.*
 import fs2.Stream
 import fs2.io.file.{Files, Path}
 import io.circe.syntax.*
-import net.andimiller.soon.models.{Database, Event}
+import net.andimiller.soon.models.{Buckets, Database, Event}
 
 trait DB[F[_]] {
   def createIfNotExists: F[Unit]
   def getEvents: F[Vector[Event]]
+  def setEvents(e: Vector[Event]): F[Unit]
   def addEvent(e: Event): F[Unit]
   def deleteEvent(index: Int): F[Unit]
+  def setBuckets(b: Buckets): F[Unit]
+  def getBuckets: F[Buckets]
 }
 
 object DB {
@@ -42,6 +45,12 @@ object DB {
         for db <- readDb
         yield db.upcoming
 
+      override def setEvents(e: Vector[Event]): F[Unit] =
+        for
+          db <- readDb
+          _  <- writeDb(db.copy(upcoming = e))
+        yield ()
+
       override def addEvent(e: Event): F[Unit] = {
         for
           db <- readDb
@@ -57,6 +66,10 @@ object DB {
           _  <- writeDb(db2)
         yield ()
       }
+
+      override def getBuckets: F[Buckets] = ???
+
+      override def setBuckets(b: Buckets): F[Unit] = ???
     }
     db.createIfNotExists.as(db)
   }

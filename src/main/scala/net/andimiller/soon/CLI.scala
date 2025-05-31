@@ -1,18 +1,38 @@
 package net.andimiller.soon
 
-import cats.data.ValidatedNel
+import cats.data.{NonEmptyList, Validated, ValidatedNel}
 import cats.implicits.*
 import com.monovore.decline.*
-import net.andimiller.soon.models.{Indexing, Offset}
-import net.andimiller.decline.completion.Completion
+import net.andimiller.soon.models.{Grouping, Indexing, Offset}
+
+import scala.util.Try
 
 object CLI:
+
+  enum SortDimension:
+    case Time
+    case Alphabetic
+
+  object SortDimension:
+    given Argument[SortDimension] = new Argument[SortDimension]:
+      override def read(string: String): ValidatedNel[String, SortDimension] =
+        Validated
+          .fromTry(
+            Try {
+              SortDimension.valueOf(
+                string.capitalize
+              )
+            }
+          )
+          .leftMap(t => NonEmptyList.of(t.getMessage))
+
+      override def defaultMetavar: String = "Time"
 
   enum Config:
     case Soon
     case Add(name: String, offset: Offset)
     case Del(id: String)
-    case Completion
+    case Sort(by: SortDimension)
 
   given Argument[Offset] = new Argument[Offset]:
     override def read(string: String): ValidatedNel[String, Offset] =
@@ -21,7 +41,8 @@ object CLI:
     override def defaultMetavar: String = "3d 10h"
 
   case class SharedSettings(
-      indexOverride: Option[Indexing.Mode]
+      indexOverride: Option[Indexing.Mode],
+      grouping: Option[Grouping]
   )
 
   val sharedSettings: Opts[SharedSettings] = (
@@ -32,19 +53,17 @@ object CLI:
         "i",
         "Numeric"
       )
+      .orNone,
+    Opts
+      .option[Grouping](
+        "grouping",
+        "how to group events when printing",
+        "g",
+        "Rainbow"
+      )
       .orNone
-    )
-    .map(SharedSettings(_))
-
-  val completion = Opts.subcommand(
-    "completion",
-    "output autocompletion scripts for common shells"
-  ) {
-    Opts.unit.as(
-      Config.Completion
-    )
-    // Completion.zshBashcompatCompletion(mainCli)
-  }
+  )
+    .mapN(SharedSettings)
 
   val cli: Command[(Config, SharedSettings)] = Command(
     name = "soon",
@@ -69,7 +88,13 @@ object CLI:
             )
           )
         )
-        .orElse(completion)
+        .orElse(
+          Opts.subcommand(
+            Command(name = "sort", header = "sort the stored events")(
+              Opts.argument[SortDimension]("dimension").map(Config.Sort(_))
+            )
+          )
+        )
         .orElse(
           Opts.unit.as(
             Config.Soon

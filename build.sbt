@@ -15,7 +15,7 @@ name := "soon"
 // defaults set with common options shown
 nativeConfig ~= { c =>
   c.withLTO(LTO.thin)
-    .withMode(Mode.debug)
+    .withMode(Mode.releaseFast)
     .withGC(GC.immix)
     .withBuildTarget(BuildTarget.application)
 //.withLinkingOptions(c.linkingOptions ++ Seq("-fuse-ld=mold"))
