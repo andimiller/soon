@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.implicits.*
 import cats.effect.{ExitCode, IO, IOApp}
 import fs2.io.file.Path
-import net.andimiller.soon.logic.{Core, DB}
+import net.andimiller.soon.logic.{Core, DB, Zones}
 import net.andimiller.soon.models.Indexing
 
 object Main extends IOApp:
@@ -24,6 +24,7 @@ object Main extends IOApp:
     CLI.cli.parse(args, sys.env) match
       case Left(value)            => IO.println(value).as(ExitCode.Error)
       case Right((cmd, settings)) =>
+        implicit val zones: Zones[IO] = Zones.linux[IO]
         for
           c   <- configPath[IO]
           db  <- DB.create[IO](c)

@@ -17,6 +17,8 @@ import java.time.{ZoneOffset, ZonedDateTime}
 
 class CoreSpec extends CatsEffectSuite:
 
+  implicit val zones: Zones[IO] = Zones.default[IO]
+
   test("Add events and print them out") {
 
     Files[IO].tempFile.use { dbPath =>

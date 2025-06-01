@@ -9,6 +9,8 @@ import net.andimiller.soon.CLI.{Config, SortDimension}
 import net.andimiller.soon.models.{Event, Grouping, Indexing}
 import fansi.Color.Cyan
 
+import java.time.{ZoneId, ZoneOffset}
+
 trait Core[F[_]]:
   def run(cmd: CLI.Config): F[Unit]
 
@@ -18,7 +20,7 @@ object Core:
   ): Vector[(String, Event)] =
     (Indexing.alphabets(mode) ++ LazyList.continually("?")).zip(events).toVector
 
-  def create[F[_]: {Async, Console, Clock}](
+  def create[F[_]: {Async, Console, Clock, Zones}](
       db: DB[F],
       mode: Indexing.Mode,
       grouping: Option[Grouping]
@@ -68,7 +70,13 @@ object Core:
             for
               now        <- Clock[F].realTimeInstant
               granularity = offset.granularity
-              roundedNow  = now.truncatedTo(granularity.chrono)
+              zone       <- Zones[F].defaultTimezone
+              zoned       = now.atZone(zone)
+              roundedNow  = zoned
+                              .truncatedTo(granularity.chrono)
+                              .withZoneSameInstant(ZoneOffset.UTC)
+                              .toInstant
+              _           = println(s"using a zone of $zone")
               ts          = roundedNow.plusSeconds(offset.toSeconds)
               _          <- db.addEvent(Event(ts, granularity, name))
             yield ()
