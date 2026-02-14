@@ -6,7 +6,13 @@ import cats.effect.Async
 import cats.effect.kernel.Clock
 import cats.effect.std.Console
 import net.andimiller.soon.CLI.{Config, SortDimension}
-import net.andimiller.soon.models.{Event, Grouping, Indexing}
+import net.andimiller.soon.models.{
+  DateTimeInput,
+  Event,
+  Grouping,
+  Indexing,
+  TimeUnit
+}
 import fansi.Color.Cyan
 
 import java.time.{ZoneId, ZoneOffset}
@@ -66,19 +72,27 @@ object Core:
                   )
                 }
             yield ()
-          case Config.Add(name, offset)          =>
+          case Config.Add(name, input)           =>
             for
-              now        <- Clock[F].realTimeInstant
-              granularity = offset.granularity
-              zone       <- Zones[F].defaultTimezone
-              zoned       = now.atZone(zone)
-              roundedNow  = zoned
-                              .truncatedTo(granularity.chrono)
-                              .withZoneSameInstant(ZoneOffset.UTC)
-                              .toInstant
-              _           = println(s"using a zone of $zone")
-              ts          = roundedNow.plusSeconds(offset.toSeconds)
-              _          <- db.addEvent(Event(ts, granularity, name))
+              now  <- Clock[F].realTimeInstant
+              zone <- Zones[F].defaultTimezone
+              event = input match
+                        case DateTimeInput.Relative(offset)           =>
+                          val granularity = offset.granularity
+                          val zoned       = now.atZone(zone)
+                          val roundedNow  = zoned
+                            .truncatedTo(granularity.chrono)
+                            .withZoneSameInstant(ZoneOffset.UTC)
+                            .toInstant
+                          val ts          = roundedNow.plusSeconds(offset.toSeconds)
+                          Event(ts, granularity, name)
+                        case DateTimeInput.AbsoluteDate(date)         =>
+                          val ts = date.atStartOfDay(zone).toInstant
+                          Event(ts, TimeUnit.Day, name)
+                        case DateTimeInput.AbsoluteDateTime(dt, gran) =>
+                          val ts = dt.atZone(zone).toInstant
+                          Event(ts, gran, name)
+              _    <- db.addEvent(event)
             yield ()
           case Config.Sort(by)                   =>
             for {
@@ -133,4 +147,17 @@ object Core:
                               s"Could not find corresponding event for index $idxStr"
                             )
                         }
+            yield ()
+          case Config.Prune                      =>
+            for
+              d                   <- db.getEvents
+              now                 <- Clock[F].realTimeInstant
+              (expired, remaining) = d.partition(!_.timestamp.isAfter(now))
+              _                   <-
+                expired.traverse(e => Console[F].println(s"Removed: ${e.name}"))
+              _                   <- db.setEvents(remaining)
+              _                   <-
+                Console[F].println(
+                  s"Pruned ${expired.size} expired event(s), ${remaining.size} remaining."
+                )
             yield ()

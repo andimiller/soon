@@ -9,11 +9,11 @@ import cats.effect.Temporal
 import munit.CatsEffectSuite
 import net.andimiller.soon.CLI.Config
 import net.andimiller.soon.logic.FakeConsole.OutStream
-import net.andimiller.soon.models.{Grouping, Indexing, Offset}
+import net.andimiller.soon.models.{DateTimeInput, Grouping, Indexing, Offset}
 import net.andimiller.soon.models.TimeUnit.*
 
 import scala.concurrent.duration.*
-import java.time.{ZoneOffset, ZonedDateTime}
+import java.time.{LocalDate, LocalDateTime, ZoneOffset, ZonedDateTime}
 
 class CoreSpec extends CatsEffectSuite:
 
@@ -31,8 +31,18 @@ class CoreSpec extends CatsEffectSuite:
           )
         db                <- DB.create[IO](dbPath)
         core               = Core.create[IO](db, Indexing.Mode.alpha, None)
-        _                 <- core.run(Config.Add("event one", Offset.Single(1, Hour)))
-        _                 <- core.run(Config.Add("event two", Offset.Single(1, Day)))
+        _                 <- core.run(
+                               Config.Add(
+                                 "event one",
+                                 DateTimeInput.Relative(Offset.Single(1, Hour))
+                               )
+                             )
+        _                 <- core.run(
+                               Config.Add(
+                                 "event two",
+                                 DateTimeInput.Relative(Offset.Single(1, Day))
+                               )
+                             )
         _                 <- core.run(Config.Soon)
         _                 <-
           implicitly[FakeConsole].queue
@@ -57,8 +67,18 @@ class CoreSpec extends CatsEffectSuite:
           given FakeConsole <- FakeConsole.create()
           db                <- DB.create[IO](dbPath)
           core               = Core.create[IO](db, Indexing.Mode.number, None)
-          _                 <- core.run(Config.Add("event one", Offset.Single(1, Hour)))
-          _                 <- core.run(Config.Add("event two", Offset.Single(1, Day)))
+          _                 <- core.run(
+                                 Config.Add(
+                                   "event one",
+                                   DateTimeInput.Relative(Offset.Single(1, Hour))
+                                 )
+                               )
+          _                 <- core.run(
+                                 Config.Add(
+                                   "event two",
+                                   DateTimeInput.Relative(Offset.Single(1, Day))
+                                 )
+                               )
           _                 <- core.run(Config.Soon)
           _                 <-
             implicitly[FakeConsole].queue
@@ -81,7 +101,12 @@ class CoreSpec extends CatsEffectSuite:
                 )
               )
           _                 <- IO.sleep(2.hours)
-          _                 <- core.run(Config.Add("event three", Offset.Single(2, Day)))
+          _                 <- core.run(
+                                 Config.Add(
+                                   "event three",
+                                   DateTimeInput.Relative(Offset.Single(2, Day))
+                                 )
+                               )
           _                 <- core.run(Config.Soon)
           _                 <-
             implicitly[FakeConsole].queue
@@ -153,8 +178,18 @@ class CoreSpec extends CatsEffectSuite:
           groupedCore        =
             Core
               .create[IO](db, Indexing.Mode.number, Some(Grouping.TrafficLight))
-          _                 <- groupedCore.run(Config.Add("next week", Offset.Single(8, Day)))
-          _                 <- groupedCore.run(Config.Add("week after", Offset.Single(16, Day)))
+          _                 <- groupedCore.run(
+                                 Config.Add(
+                                   "next week",
+                                   DateTimeInput.Relative(Offset.Single(8, Day))
+                                 )
+                               )
+          _                 <- groupedCore.run(
+                                 Config.Add(
+                                   "week after",
+                                   DateTimeInput.Relative(Offset.Single(16, Day))
+                                 )
+                               )
           _                 <- groupedCore.run(Config.Soon)
           _                 <-
             implicitly[FakeConsole].queue
@@ -180,5 +215,120 @@ class CoreSpec extends CatsEffectSuite:
                    .map(_.get)
                    .assertEquals(Outcome.Succeeded[cats.Id, Throwable, Unit](()))
     yield ()
+
+  }
+
+  test("Add event with absolute date") {
+
+    Files[IO].tempFile.use { dbPath =>
+      for {
+        _                 <- Files[IO].delete(dbPath)
+        given FakeConsole <- FakeConsole.create()
+        given FakeClock    =
+          FakeClock(
+            ZonedDateTime.of(2025, 5, 18, 20, 0, 0, 0, ZoneOffset.UTC).toInstant
+          )
+        db                <- DB.create[IO](dbPath)
+        core               = Core.create[IO](db, Indexing.Mode.alpha, None)
+        _                 <- core.run(
+                               Config.Add(
+                                 "birthday",
+                                 DateTimeInput.AbsoluteDate(LocalDate.of(2025, 5, 20))
+                               )
+                             )
+        _                 <- core.run(Config.Soon)
+        _                 <-
+          implicitly[FakeConsole].queue
+            .tryTakeN(None)
+            .assertEquals(
+              List(
+                OutStream.Std -> s"a) birthday 2d${System.lineSeparator()}"
+              )
+            )
+      } yield ()
+    }
+
+  }
+
+  test("Add event with absolute datetime") {
+
+    Files[IO].tempFile.use { dbPath =>
+      for {
+        _                 <- Files[IO].delete(dbPath)
+        given FakeConsole <- FakeConsole.create()
+        given FakeClock    =
+          FakeClock(
+            ZonedDateTime.of(2025, 5, 18, 20, 0, 0, 0, ZoneOffset.UTC).toInstant
+          )
+        db                <- DB.create[IO](dbPath)
+        core               = Core.create[IO](db, Indexing.Mode.alpha, None)
+        _                 <- core.run(
+                               Config.Add(
+                                 "meeting",
+                                 DateTimeInput.AbsoluteDateTime(
+                                   LocalDateTime.of(2025, 5, 18, 22, 0),
+                                   Minute
+                                 )
+                               )
+                             )
+        _                 <- core.run(Config.Soon)
+        _                 <-
+          implicitly[FakeConsole].queue
+            .tryTakeN(None)
+            .assertEquals(
+              List(
+                OutStream.Std -> s"a) meeting 2h${System.lineSeparator()}"
+              )
+            )
+      } yield ()
+    }
+
+  }
+
+  test("Prune removes expired events") {
+
+    Files[IO].tempFile.use { dbPath =>
+      for {
+        _                 <- Files[IO].delete(dbPath)
+        given FakeConsole <- FakeConsole.create()
+        given FakeClock    =
+          FakeClock(
+            ZonedDateTime.of(2025, 5, 18, 20, 0, 0, 0, ZoneOffset.UTC).toInstant
+          )
+        db                <- DB.create[IO](dbPath)
+        core               = Core.create[IO](db, Indexing.Mode.alpha, None)
+        _                 <- core.run(
+                               Config.Add(
+                                 "past event",
+                                 DateTimeInput.AbsoluteDate(LocalDate.of(2025, 5, 17))
+                               )
+                             )
+        _                 <- core.run(
+                               Config.Add(
+                                 "future event",
+                                 DateTimeInput.Relative(Offset.Single(2, Day))
+                               )
+                             )
+        _                 <- core.run(Config.Prune)
+        _                 <-
+          implicitly[FakeConsole].queue
+            .tryTakeN(None)
+            .assertEquals(
+              List(
+                OutStream.Std -> s"Removed: past event${System.lineSeparator()}",
+                OutStream.Std -> s"Pruned 1 expired event(s), 1 remaining.${System.lineSeparator()}"
+              )
+            )
+        _                 <- core.run(Config.Soon)
+        _                 <-
+          implicitly[FakeConsole].queue
+            .tryTakeN(None)
+            .assertEquals(
+              List(
+                OutStream.Std -> s"a) future event 2d${System.lineSeparator()}"
+              )
+            )
+      } yield ()
+    }
 
   }

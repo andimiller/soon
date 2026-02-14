@@ -16,6 +16,8 @@ in rec {
       libunwind
       clang
       zlib
+      zlib.static
+      glibc.static
       s2n-tls
       nodejs
       utf8proc
